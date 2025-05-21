@@ -1,0 +1,20 @@
+# 훈련 데이터 셋
+sign_data/
+labels/
+processed_train_data/
+
+# 검증 데이터 셋
+val_data/
+filtered_val_data/
+
+# 전처리 데이터 셋
+numpy_data/
+
+# 가상 환경
+venv/
+
+# log 파일
+logs/
+
+# 캐시
+__pycache__/
