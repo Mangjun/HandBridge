@@ -3,12 +3,12 @@ import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # 원본 학습 데이터 경로
-raw_sign_data_dir = Path("./sign_data")
-raw_label_dir = Path("./labels")
+raw_sign_data_dir = Path("./val_sign_data")
+raw_label_dir = Path("./val_labels")
 
 # 결과 저장 경로
-out_sign_data_dir = Path("./processed_train_data/sign_data")
-out_label_dir = Path("./processed_train_data/labels")
+out_sign_data_dir = Path("./processed_val_data/sign_data")
+out_label_dir = Path("./processed_val_data/labels")
 
 # 디렉터리 생성
 out_sign_data_dir.mkdir(parents=True, exist_ok=True)
@@ -48,6 +48,6 @@ with ThreadPoolExecutor(max_workers=8) as executor:
     for f in as_completed(futures):
         count += f.result()
 
-print(f"✅ F 시점 학습 샘플 {count}개 복사 완료")
+print(f"✅ F 시점 검증 샘플 {count}개 복사 완료")
 print(f"📂 sign_data: {out_sign_data_dir}")
 print(f"📂 labels: {out_label_dir}")

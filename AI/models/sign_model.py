@@ -41,7 +41,7 @@ class SignModel(nn.Module):
         """
         # 시퀀스 정렬을 위한 pack 처리
         packed_input = nn.utils.rnn.pack_padded_sequence(
-            x, lengths.cpu(), batch_first=True, enforce_sorted=False
+            x, lengths.cpu(), batch_first=True, enforce_sorted=True
         )
 
         # LSTM 처리
