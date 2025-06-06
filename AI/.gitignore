@@ -2,10 +2,13 @@
 sign_data/
 labels/
 processed_train_data/
+numpy_train_data/
 
 # 검증 데이터 셋
-val_data/
-filtered_val_data/
+val_sign_data/
+val_labels/
+processed_val_data/
+numpy_val_data/
 
 # 전처리 데이터 셋
 numpy_data/

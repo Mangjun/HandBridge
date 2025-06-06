@@ -1,85 +1,123 @@
-import json
+import os
+import glob
 import numpy as np
-import unicodedata
-from pathlib import Path
+import cv2
+import mediapipe as mp
+import json
+from multiprocessing import Pool
+from tqdm import tqdm
 
-# ==== 설정 부분만 필요에 맞게 바꾸세요 ====  
-SIGN_DIR = Path("./filtered_val_data/sign_data")  # 검증 keypoint 디렉터리  
-LABEL_DIR = Path("./filtered_val_data/labels")    # 검증 라벨 디렉터리  
-OUTPUT_DIR = Path("./numpy_data/val")    # 출력 디렉터리  
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-LABEL_MAP_PATH = OUTPUT_DIR / "label_map.json"
-# ========================================
+mp_hands = mp.solutions.hands
 
-# 유니코드 정규화 함수
-def normalize(label):
-    return unicodedata.normalize("NFC", label.strip())
+VIDEO_DIR = './processed_val_data/sign_data'
+LABELS_DIR = './processed_val_data/labels'
+OUTPUT_DIR = './numpy_val_data'
+LABEL2IDX_PATH = './numpy_train_data/label2idx.json'
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-label_map = {}
+# 라벨명 → 인덱스 맵
+with open(LABEL2IDX_PATH, 'r', encoding='utf-8') as f:
+    label2idx = json.load(f)
 
-# 1) 검증 라벨 목록 및 총 개수
-label_files = list(LABEL_DIR.glob("*_F_morpheme.json"))
-total = len(label_files)
-print(f"📂 검증 라벨 총개수: {total}")
+def get_label_from_json(json_path):
+    # morpheme.json에서 label 추출
+    with open(json_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    try:
+        label = data["data"][0]["attributes"][0]["name"]
+    except Exception:
+        label = ""
+    return label
 
-# 2) 각 라벨 파일 처리
-for idx, label_file in enumerate(label_files, 1):
-    print(f"🔄 처리 중 {idx}/{total}: {label_file.name}")
-    with open(label_file, encoding="utf-8-sig") as lf:
-        meta = json.load(lf)
+def process_one(label_json_path):
+    with open(label_json_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    meta_name = data.get("metaData", {}).get("name", "")
+    if not meta_name:
+        return
 
-    # 메타 유효성 검사
-    if not meta.get("data") or not meta["data"][0].get("attributes"):
-        print(f"   ⚠️ 유효하지 않은 메타데이터, 스킵: {label_file.name}")
-        continue
+    prefix = meta_name.replace('.mp4', '')
+    video_path = os.path.join(VIDEO_DIR, meta_name)
+    if not os.path.exists(video_path):
+        print(f"비디오 없음: {video_path}")
+        return
 
-    # 라벨명 정규화 및 맵핑
-    label_name = normalize(meta["data"][0]["attributes"][0]["name"])
-    if label_name not in label_map:
-        label_map[label_name] = len(label_map)
-    label_idx = label_map[label_name]
+    # 라벨명 추출
+    try:
+        label = data["data"][0]["attributes"][0]["name"]
+    except Exception:
+        label = ""
 
-    # keypoint 폴더
-    base = label_file.stem.replace("_morpheme", "")
-    folder = SIGN_DIR / base
-    if not folder.exists():
-        print(f"   ⚠️ 키포인트 폴더 없음, 스킵: {folder}")
-        continue
+    if label not in label2idx:
+        print(f"라벨맵에 없는 label: {label}")
+        return
 
-    frames = []
-    jsons = sorted(folder.glob("*_F_*.json"))
-    total_frames = len(jsons)
-    print(f"   ▶ 총 프레임 수: {total_frames}")
+    label_idx = label2idx[label]
 
-    # 3) 프레임별 처리
-    for f_idx, jf in enumerate(jsons, 1):
-        # 진행률 표시
-        if f_idx % 10 == 0 or f_idx == total_frames:
-            print(f"      ⏳ 프레임 {f_idx}/{total_frames} 처리")
-        try:
-            with open(jf, encoding="utf-8-sig") as f:
-                data = json.load(f)
-        except Exception:
+    npz_save_path = os.path.join(OUTPUT_DIR, prefix + ".npz")
+    if os.path.exists(npz_save_path):
+        return
+
+    hands = mp_hands.Hands(
+        static_image_mode=False,
+        max_num_hands=2,  # 두 손까지 탐지
+        min_detection_confidence=0.5,
+        min_tracking_confidence=0.5
+    )
+    keypoints_list = []
+    cap = cv2.VideoCapture(video_path)
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    target_fps = 30
+    frame_count = 0
+
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+        if fps > target_fps and frame_count % int(fps // target_fps) != 0:
+            frame_count += 1
             continue
-        people = data.get("people", {})
-        left = people.get("hand_left_keypoints_2d", [])
-        right = people.get("hand_right_keypoints_2d", [])
-        if left and right:
-            frames.append(left + right)
 
-    # 최소 프레임 수 확인
-    if len(frames) < 5:
-        print(f"   ⚠️ 시퀀스 길이 부족 ({len(frames)}), 스킵: {base}")
-        continue
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = hands.process(frame_rgb)
 
-    # NumPy 배열 저장
-    arr = np.array(frames, dtype=np.float32)
-    out_path = OUTPUT_DIR / f"{base}.npz"
-    np.savez_compressed(out_path, keypoints=arr, label=label_idx)
+        # 양손 keypoint (왼손-오른손 순)
+        frame_keypoints = []
+        if results.multi_hand_landmarks:
+            left_hand = None
+            right_hand = None
+            for handedness, hand_landmarks in zip(results.multi_handedness, results.multi_hand_landmarks):
+                label_h = handedness.classification[0].label
+                if label_h == 'Left':
+                    left_hand = hand_landmarks
+                elif label_h == 'Right':
+                    right_hand = hand_landmarks
+            for hand in [left_hand, right_hand]:
+                if hand is not None:
+                    kp = []
+                    for lm in hand.landmark:
+                        kp.extend([lm.x, lm.y, lm.z])
+                    frame_keypoints.extend(kp)
+                else:
+                    frame_keypoints.extend([0]*63)
+        else:
+            frame_keypoints = [0]*126
+        keypoints_list.append(frame_keypoints)
+        frame_count += 1
 
-# 4) 라벨맵 JSON 저장
-with open(LABEL_MAP_PATH, 'w', encoding='utf-8') as f:
-    json.dump(label_map, f, ensure_ascii=False, indent=2)
+    cap.release()
+    hands.close()
 
-print(f"✅ 검증 데이터 변환 완료: {len(label_map)} classes, {len(list(OUTPUT_DIR.glob('*.npz')))} files")
-print(f"✅ 검증 라벨맵 저장: {LABEL_MAP_PATH}")
+    keypoints_array = np.array(keypoints_list)  # shape: (프레임, 126)
+    np.savez(npz_save_path, keypoints=keypoints_array, label=label_idx)
+    return
+
+def main():
+    label_files = glob.glob(os.path.join(LABELS_DIR, '*_morpheme.json'))
+
+    with Pool(processes=8) as pool, tqdm(total=len(label_files)) as pbar:
+        for _ in pool.imap_unordered(process_one, label_files):
+            pbar.update()
+
+if __name__ == "__main__":
+    main()

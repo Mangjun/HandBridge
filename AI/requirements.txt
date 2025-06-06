@@ -1,10 +1,8 @@
-# PyTorch + CUDA 11.8
-torch==2.1.2+cu118
-torchvision==0.16.2+cu118
-torchaudio==2.1.2+cu118
+torch==2.3.1+cu118
+torchvision==0.18.1+cu118
+torchaudio==2.3.1+cu118
 --extra-index-url https://download.pytorch.org/whl/cu118
 
-# 기타 필수 라이브러리
 numpy
 matplotlib
 tqdm
