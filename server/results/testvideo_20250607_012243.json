@@ -1,0 +1,22 @@
+{
+  "video_info": {
+    "original_fps": 24.0,
+    "target_fps": 30,
+    "total_frames": 118,
+    "target_frames": 147,
+    "duration": 4.916666666666667,
+    "resolution": [
+      1280,
+      720
+    ],
+    "processed_frames": 147,
+    "filename": "testvideo_20250607_012243.mp4",
+    "original_name": "testvideo.mp4",
+    "processed_at": "2025-06-07T01:22:49.232419"
+  },
+  "keypoints_shape": [
+    147,
+    126
+  ],
+  "total_frames": 147
+}
