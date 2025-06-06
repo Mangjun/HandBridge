@@ -1,0 +1,130 @@
+# ========== macOS ==========
+.DS_Store
+.AppleDouble
+.LSOverride
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+.apdisk
+Icon
+._*
+
+# ========== Node.js ==========
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.yarn-integrity
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnp.*
+package-lock.json
+*.tgz
+
+# ========== Logs ==========
+logs
+*.log
+*.pid
+*.seed
+*.pid.lock
+.nyc_output
+coverage/
+*.lcov
+.report.*
+.rpt2_cache/
+.rts2_cache_*/
+.grunt
+.eslintcache
+.stylelintcache
+.cache/
+.parcel-cache
+
+# ========== Environment ==========
+.env
+.env.local
+.env.*.local
+xcode.env
+xcode.env.local
+
+# ========== TypeScript ==========
+*.tsbuildinfo
+
+# ========== VSCode ==========
+.vscode/
+.vscode-test/
+
+# ========== iOS (Xcode & CocoaPods) ==========
+ios/Pods/
+ios/build/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.xcuserstate
+*.xccheckout
+*.hmap
+*.ipa
+*.xcscmblueprint
+DerivedData/
+xcuserdata/
+*.xcode.env.local
+
+# ========== Android ==========
+android/.gradle/
+android/app/build/
+.gradle/
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+output.json
+*.hprof
+
+# Android Studio
+.idea/
+*.iml
+misc.xml
+deploymentTargetDropDown.xml
+render.experimental.xml
+
+# Keystore
+*.jks
+*.keystore
+!debug.keystore
+
+# Firebase/Google
+google-services.json
+
+# ========== React Native ==========
+*.jsbundle
+.metro-cache/
+.expo/
+__generated__/
+
+# ========== Fastlane ==========
+*/fastlane/report.xml
+*/fastlane/Preview.html
+*/fastlane/screenshots/
+*/fastlane/test_output/
+
+# ========== Others ==========
+lib-cov/
+bower_components/
+jspm_packages/
+web_modules/
+serverless/
+.dynamodb/
+.fusebox/
+.directory
+*.nfs*
