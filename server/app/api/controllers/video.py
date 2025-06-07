@@ -9,6 +9,7 @@ import traceback
 from pathlib import Path
 
 from ...services.mediapipe_service import MediapipeService
+from ...services.emotion_service import EmotionService
 from ...utils.file_utils import (
     validate_video_file,
     generate_unique_filename,
@@ -19,8 +20,9 @@ from ...utils.file_utils import (
 from ...core.config import UPLOAD_DIR, RESULTS_DIR
 from ...models.schemas import ProcessingResult, ErrorResponse
 
-router = APIRouter()
+router = APIRouter(tags=["video"])
 mediapipe_service = MediapipeService()
+emotion_service = EmotionService()
 
 @router.post("/upload", 
             response_model=ProcessingResult,
@@ -39,8 +41,11 @@ async def upload_video(
         # 파일 저장
         file_path = await save_upload_file(file, unique_filename)
         
-        # 비디오 처리
+        # 비디오 처리 - 키포인트 추출
         frames_data, video_info = mediapipe_service.process_video(file_path)
+        
+        # 감정 분석 - 마지막 프레임
+        emotion_result, _ = emotion_service.process_video(str(file_path))
         
         # 비디오 정보 업데이트
         video_info.update({
@@ -57,14 +62,17 @@ async def upload_video(
             background_tasks.add_task(cleanup_old_files, UPLOAD_DIR)
             background_tasks.add_task(cleanup_old_files, RESULTS_DIR)
         
-        return {
+        response_data = {
             "video_info": video_info,
             "keypoints": frames_data.tolist(),
+            "emotion_analysis": emotion_result,
             "files": {
                 "json": str(json_path),
                 "npz": str(npz_path)
             }
         }
+        
+        return response_data
         
     except HTTPException as e:
         raise e
