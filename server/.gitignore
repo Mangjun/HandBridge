@@ -40,3 +40,6 @@ results/
 # System
 .DS_Store
 Thumbs.db 
+
+# API Key
+api-key-local
