@@ -1,0 +1,17 @@
+fastapi==0.104.1
+uvicorn==0.24.0
+python-multipart==0.0.6
+mediapipe==0.10.8
+opencv-python==4.8.1.78
+numpy==1.24.3
+python-jose[cryptography]==3.3.0
+aiofiles==23.2.1
+scipy==1.15.3
+transformers==4.35.2
+torch==2.1.1
+pillow==10.1.0
+mtcnn==0.1.1
+pandas>=1.5.0
+openai==0.28.1
+python-dotenv==1.0.0
+pydantic==2.4.2

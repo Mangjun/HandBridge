@@ -25,7 +25,7 @@ export default function CameraView() {
     setDevicePosition(prev => (prev === 'front' ? 'back' : 'front'));
   };
 
-    // 영상 업로드 함수
+  // 영상 업로드 함수
   const uploadVideoToServer = async (filePath: string) => {
     const file = {
       uri: Platform.OS === 'ios' ? filePath : 'file://' + filePath,
@@ -34,10 +34,10 @@ export default function CameraView() {
     };
 
     const formData = new FormData();
-    formData.append('video', file as any);
+    formData.append('file', file as any);
 
     try {
-      const response = await fetch('http://<YOUR_FASTAPI_SERVER_IP>:<PORT>/upload', {
+      const response = await fetch('http://192.168.45.187:8000/api/v1/video/upload', {
         method: 'POST',
         headers: {
           'Content-Type': 'multipart/form-data',
@@ -60,6 +60,7 @@ export default function CameraView() {
       onRecordingFinished: (video) => {
         console.log('녹화 완료:', video);
         setIsRecording(false);
+        uploadVideoToServer(video.path);
       },
       onRecordingError: (err) => {
         console.error('녹화 실패:', err);
