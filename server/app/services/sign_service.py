@@ -2,7 +2,7 @@ import torch
 import numpy as np
 import json
 
-from models.sign_model import SignModel
+from app.models.sign_model import SignModel
 
 class SignWordExtractor:
     def __init__(self, model_path, label_map_path, input_size=126, device="cpu", window_size=30, stride=30):

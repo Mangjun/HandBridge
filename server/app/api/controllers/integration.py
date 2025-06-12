@@ -6,6 +6,7 @@ import numpy as np
 import cv2
 import traceback
 from pathlib import Path
+import logging
 
 from ...services.mediapipe_service import MediapipeService
 from ...services.emotion_service import EmotionService
@@ -19,17 +20,31 @@ from ...utils.file_utils import (
 )
 from ...core.config import UPLOAD_DIR
 
+# 로깅 설정
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# 프로젝트 루트 디렉토리 설정
+BASE_DIR = Path(__file__).resolve().parent.parent.parent.parent
+MODELS_DIR = BASE_DIR / "app" / "models"
+
 router = APIRouter(tags=["integrated"])
 mediapipe_service = MediapipeService()
 emotion_service = EmotionService()
-sign_word_extractor = SignWordExtractor(
-    model_path="models/best_model.pth",
-    label_map_path="models/label_map.json",
-    window_size=30,
-    stride=30,
-    device="cpu"
-)
-text_service = TextGenerator()
+
+try:
+    sign_word_extractor = SignWordExtractor(
+        model_path=str(MODELS_DIR / "best_model.pth"),
+        label_map_path=str(MODELS_DIR / "label_map.json"),
+        input_size=126,
+        window_size=30,
+        stride=30,
+        device="cpu"
+    )
+    text_service = TextGenerator()
+except Exception as e:
+    logger.error(f"서비스 초기화 중 오류 발생: {str(e)}")
+    raise
 
 @router.post("/analyze", response_model=Dict[str, Any])
 async def analyze_video(
@@ -40,26 +55,35 @@ async def analyze_video(
     영상 파일을 받아 keypoints, 단어, 감정, 문장까지 한 번에 반환하는 통합 API
     """
     try:
+        logger.info(f"영상 분석 시작: {file.filename}")
+        
         validate_video_file(file)
         unique_filename, _ = generate_unique_filename(file.filename)
         
         # 1. 파일 저장
         file_path = await save_upload_file(file, unique_filename)
+        logger.info(f"파일 저장 완료: {file_path}")
         
         # 2. keypoints 추출
-        keypoints = mediapipe_service.extract_keypoints_from_video(file_path)
+        keypoints = mediapipe_service.extract_keypoints_from_video(str(file_path))
         if len(keypoints) < 30:
             raise HTTPException(status_code=400, detail="프레임 수가 부족합니다. (최소 30프레임 필요)")
+        logger.info(f"키포인트 추출 완료: {len(keypoints)} 프레임")
         
         # 3. 단어 리스트 추출 (window 단위)
         words = sign_word_extractor.predict_words(keypoints)
+        logger.info(f"단어 추출 완료: {words}")
         
-        # 4. 감정 분석 (예시: 마지막 프레임 기준)
+        # 4. 감정 분석
         emotion_result, _ = emotion_service.process_video(str(file_path))
         emotion = emotion_result.get("emotion", "neutral")
+        if "error" in emotion_result:
+            logger.warning(f"감정 분석 중 경고: {emotion_result['error']}")
+        logger.info(f"감정 분석 완료: {emotion} (프레임 {emotion_result.get('frame_analyzed', 0)})")
         
         # 5. 문장 생성
         generated_sentence = text_service.generate_sentence(words, emotion)
+        logger.info(f"문장 생성 완료: {generated_sentence}")
         
         # 6. 백그라운드 파일 정리
         if background_tasks:
@@ -67,8 +91,6 @@ async def analyze_video(
         
         # 7. 결과 반환
         return {
-            "sign_words": words,
-            "emotion": emotion,
             "generated_sentence": generated_sentence,
             "video_info": {
                 "filename": unique_filename,
@@ -79,7 +101,9 @@ async def analyze_video(
         }
         
     except HTTPException as e:
-        raise e
+        logger.error(f"HTTP 오류: {str(e)}")
+        raise
     except Exception as e:
         error_msg = f"처리 중 오류 발생: {str(e)}\n{traceback.format_exc()}"
+        logger.error(error_msg)
         raise HTTPException(status_code=500, detail=error_msg)

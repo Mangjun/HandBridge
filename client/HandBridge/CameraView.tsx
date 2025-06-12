@@ -9,7 +9,8 @@ export default function CameraView() {
   const cameraRef = useRef<Camera>(null);
   const [hasPermission, setHasPermission] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
-  const [translatedText, setTranslatedText] = useState('번역된 수어 텍스트 예시');
+  const [translatedText, setTranslatedText] = useState('수어를 녹화해주세요.');
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -25,8 +26,8 @@ export default function CameraView() {
     setDevicePosition(prev => (prev === 'front' ? 'back' : 'front'));
   };
 
-  // 영상 업로드 함수
   const uploadVideoToServer = async (filePath: string) => {
+    setIsLoading(true);
     const file = {
       uri: Platform.OS === 'ios' ? filePath : 'file://' + filePath,
       type: 'video/mp4',
@@ -37,20 +38,36 @@ export default function CameraView() {
     formData.append('file', file as any);
 
     try {
-      const response = await fetch('http://192.168.45.187:8000/api/v1/video/upload', {
+      const response = await fetch('http://192.168.45.187:8000/api/v1/analyze', {
         method: 'POST',
         headers: {
           'Content-Type': 'multipart/form-data',
         },
         body: formData,
       });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('❌ 서버 오류:', errorData);
+        throw new Error(errorData.detail || '서버 오류 발생');
+      }
+
       const result = await response.json();
-      console.log('✅ 업로드 성공:', result);
+      console.log('✅ 분석 성공:', result);
+      
+      // 생성된 문장을 화면에 표시
+      if (result.generated_sentence) {
+        setTranslatedText(result.generated_sentence);
+      } else {
+        setTranslatedText('문장 생성에 실패했습니다.');
+      }
     } catch (error) {
-      console.error('❌ 업로드 실패:', error);
+      console.error('❌ 분석 실패:', error);
+      setTranslatedText('수어 분석 중 오류가 발생했습니다.');
+    } finally {
+      setIsLoading(false);
     }
   };
-
 
   const startRecording = async () => {
     if (!cameraRef.current) return;
@@ -94,7 +111,11 @@ export default function CameraView() {
         audio={true}
       />
       <View style={cameraStyles.translationWrapper}>
-        <Text style={cameraStyles.translatedText}>{translatedText}</Text>
+        {isLoading ? (
+          <Text style={cameraStyles.translatedText}>수어를 분석하고 있습니다...</Text>
+        ) : (
+          <Text style={cameraStyles.translatedText}>{translatedText}</Text>
+        )}
       </View>
       <View style={cameraStyles.controls}>
         {isRecording ? (
@@ -105,7 +126,6 @@ export default function CameraView() {
           <TouchableOpacity style={[cameraStyles.button, cameraStyles.record]} onPress={startRecording}>
             <Text style={cameraStyles.buttonText}>⏺️ 녹화</Text>
           </TouchableOpacity>
-
         )}
         <TouchableOpacity style={[cameraStyles.button]} onPress={toggleCamera}>
           <Text style={cameraStyles.buttonText}>🔁 카메라 전환</Text>
