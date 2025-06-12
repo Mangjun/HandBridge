@@ -4,6 +4,10 @@ from typing import Dict, List, Any, Tuple
 from transformers import AutoImageProcessor, AutoModelForImageClassification
 from PIL import Image
 import torch
+from pathlib import Path
+import logging
+
+logger = logging.getLogger(__name__)
 
 class EmotionService:
     def __init__(self):
@@ -56,52 +60,51 @@ class EmotionService:
             
         return result
     
-    def process_video(self, video_path: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    def process_video(self, video_path: str) -> Tuple[Dict[str, Any], np.ndarray]:
         """
-        비디오 파일의 마지막 프레임에서 감정을 분석합니다.
-        
-        Args:
-            video_path: 비디오 파일 경로
-            
-        Returns:
-            (감정 분석 결과, 비디오 정보)
+        비디오에서 감정을 분석합니다.
         """
-        cap = cv2.VideoCapture(video_path)
-        if not cap.isOpened():
-            raise ValueError(f"비디오 파일을 열 수 없습니다: {video_path}")
+        try:
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                raise ValueError("비디오 파일을 열 수 없습니다.")
+
+            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            if frame_count == 0:
+                raise ValueError("비디오에 프레임이 없습니다.")
+
+            # 중간 프레임을 사용
+            middle_frame_idx = frame_count // 2
+            cap.set(cv2.CAP_PROP_POS_FRAMES, middle_frame_idx)
+            ret, frame = cap.read()
             
-        # 비디오 정보 가져오기
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        
-        # 비디오 정보
-        video_info = {
-            "fps": fps,
-            "frame_count": frame_count,
-            "width": width,
-            "height": height
-        }
-        
-        # 마지막 프레임으로 이동
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_count - 1)
-        ret, last_frame = cap.read()
-        cap.release()
-        
-        if not ret:
-            raise ValueError("마지막 프레임을 읽을 수 없습니다.")
-        
-        # 마지막 프레임 감정 분석
-        emotion_result = self.process_frame(last_frame)
-        
-        # 결과 출력
-        print("\n=== 감정 분석 결과 ===")
-        print(f"주요 감정: {emotion_result['dominant_emotion']['emotion']}")
-        print(f"확률: {emotion_result['dominant_emotion']['probability']:.2%}")
-        print("\n전체 감정 분포:")
-        for emotion, prob in emotion_result['emotions'].items():
-            print(f"- {emotion}: {prob:.2%}")
-        print("==================\n")
-        
-        return emotion_result, video_info 
+            if not ret:
+                # 중간 프레임을 읽지 못하면 첫 번째 프레임 시도
+                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                ret, frame = cap.read()
+                if not ret:
+                    raise ValueError("프레임을 읽을 수 없습니다.")
+
+            # 프레임에서 감정 분석 수행
+            emotion_result = self.process_frame(frame)
+            dominant_emotion = emotion_result['dominant_emotion']
+
+            cap.release()
+            
+            return {
+                "emotion": dominant_emotion['emotion'],
+                "confidence": dominant_emotion['probability'],
+                "frame_analyzed": middle_frame_idx,
+                "emotions": emotion_result['emotions']  # 전체 감정 분포도 포함
+            }, frame
+
+        except Exception as e:
+            logger.error(f"감정 분석 중 오류 발생: {str(e)}")
+            # 오류 발생 시 기본값 반환
+            return {
+                "emotion": "neutral",
+                "confidence": 1.0,
+                "frame_analyzed": 0,
+                "error": str(e),
+                "emotions": {emotion: 0.0 for emotion in self.labels}
+            }, np.zeros((480, 640, 3), dtype=np.uint8)  # 빈 프레임 반환 

@@ -5,6 +5,7 @@ from pathlib import Path
 from app.api.controllers.video import router as video_router
 from app.api.controllers.emotion import router as emotion_router
 from app.api.controllers.text_generation import router as text_generation_router
+from app.api.controllers.integration import router as integration_router
 
 # 업로드된 파일과 결과를 저장할 디렉토리 생성
 UPLOAD_DIR = Path("uploads")
@@ -30,6 +31,7 @@ app.add_middleware(
 app.include_router(video_router, prefix="/api/v1/video", tags=["video"])
 app.include_router(emotion_router, prefix="/api/v1/emotion", tags=["emotion"])
 app.include_router(text_generation_router, prefix="/api/v1/text", tags=["text"])
+app.include_router(integration_router, prefix="/api/v1", tags=["integrated"])
 
 @app.get("/")
 def read_root():
