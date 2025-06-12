@@ -43,3 +43,9 @@ Thumbs.db
 
 # API Key
 api-key-local
+
+__pycache__/
+*.pyc
+
+.DS_Store
+*.mp4
