@@ -19,6 +19,28 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 with open(LABEL2IDX_PATH, 'r', encoding='utf-8') as f:
     label2idx = json.load(f)
 
+def normalize_hand_keypoints(hand_landmarks):
+    x_list = [lm.x for lm in hand_landmarks.landmark]
+    y_list = [lm.y for lm in hand_landmarks.landmark]
+    z_list = [lm.z for lm in hand_landmarks.landmark]
+
+    x_center = np.mean(x_list)
+    y_center = np.mean(y_list)
+    z_center = np.mean(z_list)
+
+    width = max(x_list) - min(x_list)
+    height = max(y_list) - min(y_list)
+    depth = max(z_list) - min(z_list)
+    scale = max(width, height, depth) + 1e-6
+
+    normalized = []
+    for x, y, z in zip(x_list, y_list, z_list):
+        norm_x = (x - x_center) / scale
+        norm_y = (y - y_center) / scale
+        norm_z = (z - z_center) / scale
+        normalized.extend([norm_x, norm_y, norm_z])
+    return normalized  # 63개
+
 def get_label_from_json(json_path):
     # morpheme.json에서 label 추출
     with open(json_path, 'r', encoding='utf-8') as f:
@@ -42,7 +64,6 @@ def process_one(label_json_path):
         print(f"비디오 없음: {video_path}")
         return
 
-    # 라벨명 추출
     try:
         label = data["data"][0]["attributes"][0]["name"]
     except Exception:
@@ -60,7 +81,7 @@ def process_one(label_json_path):
 
     hands = mp_hands.Hands(
         static_image_mode=False,
-        max_num_hands=2,  # 두 손까지 탐지
+        max_num_hands=2,
         min_detection_confidence=0.5,
         min_tracking_confidence=0.5
     )
@@ -94,10 +115,9 @@ def process_one(label_json_path):
                     right_hand = hand_landmarks
             for hand in [left_hand, right_hand]:
                 if hand is not None:
-                    kp = []
-                    for lm in hand.landmark:
-                        kp.extend([lm.x, lm.y, lm.z])
-                    frame_keypoints.extend(kp)
+                    # === 여기에서 정규화 적용 ===
+                    norm_kp = normalize_hand_keypoints(hand)
+                    frame_keypoints.extend(norm_kp)
                 else:
                     frame_keypoints.extend([0]*63)
         else:
@@ -118,6 +138,8 @@ def main():
     with Pool(processes=8) as pool, tqdm(total=len(label_files)) as pbar:
         for _ in pool.imap_unordered(process_one, label_files):
             pbar.update()
+
+    os.system("shutdown /s /t 1")
 
 if __name__ == "__main__":
     main()

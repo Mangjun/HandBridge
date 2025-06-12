@@ -15,9 +15,8 @@ if __name__ == "__main__":
     print(f"[INFO] Using device: {device}")
 
     BATCH_SIZE = 32
-    EPOCHS = 20
+    EPOCHS = 100
     LEARNING_RATE = 1e-3
-    WARMUP_EPOCHS = 5
 
     log_dir = "./logs"
     writer = SummaryWriter(log_dir=log_dir)
@@ -58,17 +57,14 @@ if __name__ == "__main__":
         pin_memory=True
     )
 
-
     model = SignModel(input_size=126, num_classes=num_classes)
     model.to(device)
 
+    # freeze 없이 전체 파라미터 학습
     for name, param in model.named_parameters():
-        param.requires_grad = False
-    for name, param in model.named_parameters():
-        if 'classifier' in name:
-            param.requires_grad = True
+        param.requires_grad = True
 
-    optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=LEARNING_RATE)
+    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
     scheduler = StepLR(optimizer, step_size=10, gamma=0.1)
 
     checkpoint_path = "./checkpoints/best_model.pth"
@@ -88,8 +84,9 @@ if __name__ == "__main__":
         return correct.any(dim=1).float().mean().item()
 
     best_val_accuracy = 0.0
+    patience = 10
+    patience_counter = 0
 
-    # 🚨 [NEW] 첫 배치 shape/lengths 확인 디버깅 코드 추가
     def debug_batch_shape(loader, loader_name):
         for batch in loader:
             x, y, lengths = batch
@@ -99,17 +96,10 @@ if __name__ == "__main__":
     debug_batch_shape(train_loader, "train")
     debug_batch_shape(val_loader, "val")
 
-    # 학습 루프
     for epoch in range(EPOCHS):
         print(f"\n🚀 Epoch {epoch+1}/{EPOCHS} 시작")
 
-        if epoch == WARMUP_EPOCHS:
-            print("[INFO] Warm-up 완료: 전체 모델 fine-tuning 시작")
-            for param in model.parameters():
-                param.requires_grad = True
-            optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE * 0.1)
-            scheduler = StepLR(optimizer, step_size=10, gamma=0.1)
-
+        # === 학습 ===
         model.train()
         train_loss = 0.0
         correct = 0
@@ -117,7 +107,7 @@ if __name__ == "__main__":
 
         for batch in tqdm(train_loader, desc=f"[Epoch {epoch+1}] Training"):
             if batch is None:
-                continue  # 빈 배치는 스킵
+                continue
 
             inputs, labels, lengths = batch
             if total == 0:
@@ -140,6 +130,7 @@ if __name__ == "__main__":
         writer.add_scalar("Train/Accuracy", train_acc, epoch)
         print(f"[Epoch {epoch+1}] Train Loss: {train_loss:.4f} | Accuracy: {train_acc:.4f}")
 
+        # === 검증 ===
         model.eval()
         val_loss = 0.0
         val_correct = 0
@@ -149,7 +140,7 @@ if __name__ == "__main__":
         with torch.no_grad():
             for batch in tqdm(val_loader, desc=f"[Epoch {epoch+1}] Validation"):
                 if batch is None:
-                    continue  # 빈 배치는 스킵
+                    continue
 
                 inputs, labels, lengths = batch
                 if val_total == 0:
@@ -171,10 +162,18 @@ if __name__ == "__main__":
         writer.add_scalar("Val/Top5", val_top5, epoch)
         print(f"[Epoch {epoch+1}] Val Loss: {val_loss:.4f} | Accuracy: {val_acc:.4f} | Top5: {val_top5:.4f}")
 
+        # === Early stopping (patience) ===
         if val_acc > best_val_accuracy:
             best_val_accuracy = val_acc
+            patience_counter = 0
             torch.save(model.state_dict(), checkpoint_path)
             print(f"✅ Best model saved (Val Acc: {val_acc:.4f})")
+        else:
+            patience_counter += 1
+            print(f"EarlyStopping patience {patience_counter}/{patience}")
+            if patience_counter >= patience:
+                print(f"⏹️ Early stopping triggered at epoch {epoch+1}")
+                break
 
         scheduler.step()
 

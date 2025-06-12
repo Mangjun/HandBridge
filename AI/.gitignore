@@ -13,6 +13,9 @@ numpy_val_data/
 # 전처리 데이터 셋
 numpy_data/
 
+# 다른 영상 데이터 셋
+video_path/
+
 # 가상 환경
 venv/
 

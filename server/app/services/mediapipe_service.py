@@ -1,108 +1,69 @@
 import cv2
-import mediapipe as mp
 import numpy as np
-from pathlib import Path
-from typing import Dict, List, Any, Tuple
-from ..core.config import MEDIAPIPE_CONFIG
-from scipy.interpolate import interp1d
+import mediapipe as mp
 
 class MediapipeService:
-    def __init__(self):
+    def __init__(self, static_image_mode=False, max_num_hands=2,
+                 min_detection_confidence=0.5, min_tracking_confidence=0.5):
         self.mp_hands = mp.solutions.hands
-        self.hands = self.mp_hands.Hands(**MEDIAPIPE_CONFIG["hands"])
-        self.target_fps = 30 
+        self.hands = self.mp_hands.Hands(
+            static_image_mode=static_image_mode,
+            max_num_hands=max_num_hands,
+            min_detection_confidence=min_detection_confidence,
+            min_tracking_confidence=min_tracking_confidence
+        )
 
-    def process_video(self, video_path: Path) -> Tuple[np.ndarray, Dict[str, Any]]:
-        """비디오를 처리하고 키포인트를 추출합니다."""
-        cap = cv2.VideoCapture(str(video_path))
-        
-        original_fps = cap.get(cv2.CAP_PROP_FPS)
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        duration = total_frames / original_fps if original_fps > 0 else 0
+    @staticmethod
+    def normalize_hand_keypoints(hand_landmarks):
+        x_list = [lm.x for lm in hand_landmarks.landmark]
+        y_list = [lm.y for lm in hand_landmarks.landmark]
+        z_list = [lm.z for lm in hand_landmarks.landmark]
 
-        target_frames = int(duration * self.target_fps)
-        
-        original_timestamps = np.linspace(0, duration, total_frames)
-        target_timestamps = np.linspace(0, duration, target_frames)
+        x_center = np.mean(x_list)
+        y_center = np.mean(y_list)
+        z_center = np.mean(z_list)
 
-        video_info = {
-            "original_fps": original_fps,
-            "target_fps": self.target_fps,
-            "total_frames": total_frames,
-            "target_frames": target_frames,
-            "duration": duration,
-            "resolution": (width, height)
-        }
+        width = max(x_list) - min(x_list)
+        height = max(y_list) - min(y_list)
+        depth = max(z_list) - min(z_list)
+        scale = max(width, height, depth) + 1e-6
 
+        normalized = []
+        for x, y, z in zip(x_list, y_list, z_list):
+            norm_x = (x - x_center) / scale
+            norm_y = (y - y_center) / scale
+            norm_z = (z - z_center) / scale
+            normalized.extend([norm_x, norm_y, norm_z])
+        return normalized
+
+    def extract_keypoints_from_video(self, video_path):
+        cap = cv2.VideoCapture(video_path)
         all_keypoints = []
-        frame_idx = 0
-        last_valid_keypoints = None  
 
-        try:
-            while cap.isOpened():
-                success, frame = cap.read()
-                if not success:
-                    break
-
-                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                
-                results = self.hands.process(rgb_frame)
-                
-                frame_keypoints = []
-                hands_detected = False
-                
-                if results.multi_hand_landmarks:
-                    left_hand = None
-                    right_hand = None
-                    for handedness, hand_landmarks in zip(results.multi_handedness, results.multi_hand_landmarks):
-                        label = handedness.classification[0].label
-                        if label == 'Left':
-                            left_hand = hand_landmarks
-                        elif label == 'Right':
-                            right_hand = hand_landmarks
-                    
-                    for hand in [left_hand, right_hand]:
-                        if hand is not None:
-                            kp = []
-                            for lm in hand.landmark:
-                                kp.extend([lm.x, lm.y, lm.z])
-                            frame_keypoints.extend(kp)
-                            hands_detected = True
-                        else:
-                            if last_valid_keypoints is not None:
-                                frame_keypoints.extend(last_valid_keypoints[len(frame_keypoints):len(frame_keypoints)+63])
-                            else:
-                                frame_keypoints.extend([0]*63)
-                    
-                    if hands_detected:
-                        last_valid_keypoints = frame_keypoints.copy()
-                else:
-                    if last_valid_keypoints is not None:
-                        frame_keypoints = last_valid_keypoints.copy()
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = self.hands.process(frame_rgb)
+            frame_keypoints = []
+            if results.multi_hand_landmarks:
+                left_hand, right_hand = None, None
+                for handedness, hand_landmarks in zip(results.multi_handedness, results.multi_hand_landmarks):
+                    label_h = handedness.classification[0].label
+                    if label_h == 'Left':
+                        left_hand = hand_landmarks
+                    elif label_h == 'Right':
+                        right_hand = hand_landmarks
+                for hand in [left_hand, right_hand]:
+                    if hand is not None:
+                        norm_kp = self.normalize_hand_keypoints(hand)
+                        frame_keypoints.extend(norm_kp)
                     else:
-                        frame_keypoints = [0]*126
-                
-                all_keypoints.append(frame_keypoints)
-                frame_idx += 1
+                        frame_keypoints.extend([0]*63)
+            else:
+                frame_keypoints = [0]*126
+            all_keypoints.append(frame_keypoints)
 
-        finally:
-            cap.release()
-            self.hands.close()
-
-        all_keypoints = np.array(all_keypoints)
-        
-        for i in range(len(all_keypoints)):
-            if np.all(all_keypoints[i] == 0) and i > 0:
-                all_keypoints[i] = all_keypoints[i-1].copy()
-
-        interpolated = np.zeros((target_frames, 126))
-        for j in range(126):
-            if not np.all(all_keypoints[:, j] == 0):  
-                interpolator = interp1d(original_timestamps, all_keypoints[:, j], kind='linear', bounds_error=False, fill_value="extrapolate")
-                interpolated[:, j] = interpolator(target_timestamps)
-
-        video_info["processed_frames"] = len(interpolated)
-
-        return interpolated, video_info 
+        cap.release()
+        return np.array(all_keypoints)  # shape: (num_frames, 126)
