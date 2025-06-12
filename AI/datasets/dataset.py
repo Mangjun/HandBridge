@@ -2,21 +2,36 @@ import os
 import numpy as np
 import torch
 from torch.utils.data import Dataset
-from pathlib import Path
 import json
 
-class SignLanguageDataset(torch.utils.data.Dataset):
-    def __init__(self, npz_dir, label_map_path, label_json_dir=None):
-        self.npz_files = sorted([f for f in os.listdir(npz_dir) if f.endswith('.npz')])
+def augment_keypoints(keypoints):
+    # Gaussian noise
+    keypoints += np.random.normal(0, 0.01, keypoints.shape)
+    # (필요하다면 scaling, shift, flip 등 추가 가능)
+    return keypoints
+
+class SignLanguageDataset(Dataset):
+    def __init__(
+        self,
+        npz_dir,
+        label_map_path,
+        label_json_dir=None,
+        prefix_list=None,         # 사용하려는 prefix만 사용 (cross-validation 지원)
+        train=False               # train이면 augmentation 적용
+    ):
+        # prefix_list로 split 지정 가능 (없으면 전체 사용)
+        all_npz_files = [f for f in os.listdir(npz_dir) if f.endswith('.npz')]
+        if prefix_list is not None:
+            self.npz_files = [f for f in all_npz_files if os.path.splitext(f)[0] in prefix_list]
+        else:
+            self.npz_files = sorted(all_npz_files)
         self.npz_dir = npz_dir
         with open(label_map_path, "r", encoding="utf-8") as f:
             self.label_map = json.load(f)
         self.label2idx = {v: i for i, v in enumerate(sorted(set(self.label_map.values())))}
         self.idx2label = {i: v for v, i in self.label2idx.items()}
-
-        # 학습셋: npz prefix로 label_map 바로 사용
-        # 검증셋: npz prefix로 label_json_dir에서 json 불러와 라벨 추출 → label_map에서 인덱스
         self.label_json_dir = label_json_dir
+        self.train = train
 
     def __len__(self):
         return len(self.npz_files)
@@ -30,18 +45,28 @@ class SignLanguageDataset(torch.utils.data.Dataset):
         npz_path = os.path.join(self.npz_dir, npz_file)
         keypoints = np.load(npz_path)['keypoints']
 
-        # 라벨명 추출
+        # === keypoint normalization은 npz 생성 시 이미 적용됨 ===
+        # if keypoints.shape[0] > 0:
+        #     keypoints = (keypoints - keypoints.mean(axis=0)) / (keypoints.std(axis=0) + 1e-5)
+        #     # 학습 셋에만 augmentation
+        #     if self.train:
+        #         keypoints = augment_keypoints(keypoints)
+
+        if keypoints.shape[0] > 0 and self.train:
+            keypoints = augment_keypoints(keypoints)
+
+        # === label 추출 ===
         if self.label_json_dir is None:
-            # 학습셋
+            # train: prefix로 바로 매칭
             label_name = self.label_map[prefix]
         else:
-            # 검증셋: json에서 라벨명 추출
+            # val: json에서 라벨명 추출
             json_path = os.path.join(self.label_json_dir, prefix + "_morpheme.json")
             with open(json_path, "r", encoding="utf-8") as f:
                 label_json = json.load(f)
                 label_name = label_json["data"][0]["attributes"][0]["name"]
 
-        # label2idx에 없으면 None 반환
+        # label2idx에 없으면 None
         if label_name not in self.label2idx:
             return None
 

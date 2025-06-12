@@ -9,8 +9,7 @@ import random
 from models.sign_model import SignModel
 
 # === 경로 설정 ===
-VIDEO_DIR = './processed_train_data/sign_data'
-LABEL_DIR = './processed_train_data/labels'
+VIDEO_DIR = './video_path'
 MODEL_PATH = './checkpoints/best_model.pth'
 LABEL_MAP_PATH = './numpy_train_data/label_map.json'
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -69,7 +68,12 @@ def extract_keypoints_from_video(video_path):
 
     cap.release()
     hands.close()
-    return np.array(keypoints_list)  # [T, 126]
+    keypoints_np = np.array(keypoints_list)
+
+    # (T, 126)에서 mean/std normalization (frame 단위, 전체 영상 단위 등 실험)
+    if keypoints_np.shape[0] > 0:
+        keypoints_np = (keypoints_np - keypoints_np.mean(axis=0)) / (keypoints_np.std(axis=0) + 1e-5)
+    return keypoints_np
 
 # === 모델/라벨맵 로딩 ===
 with open(LABEL_MAP_PATH, 'r', encoding='utf-8') as f:
@@ -83,14 +87,13 @@ model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
 model.to(DEVICE)
 model.eval()
 
-# === 폴더 내 모든 mp4 파일 반복 ===
-video_paths = glob.glob(os.path.join(VIDEO_DIR, "*.mp4"))
+# === 영상 파일들 불러오기 ===
+video_paths = glob.glob(os.path.join(VIDEO_DIR, "*.webm"))
 random.shuffle(video_paths)
 
 for video_path in video_paths:
     video_name = os.path.basename(video_path)
     prefix = os.path.splitext(video_name)[0]
-    label_json_path = os.path.join(LABEL_DIR, prefix + "_morpheme.json")
 
     print(f"\n=== 영상: {video_name} ===")
 
@@ -114,16 +117,3 @@ for video_path in video_paths:
 
     print(f"  ✅ 예측: {pred_label} (class #{pred_idx})")
     print(f"  Top-5 예측: {top5_labels}")
-
-    # === 실제 라벨 추출 ===
-    if os.path.exists(label_json_path):
-        with open(label_json_path, "r", encoding="utf-8") as f:
-            label_json = json.load(f)
-        try:
-            real_label = label_json["data"][0]["attributes"][0]["name"]
-        except Exception:
-            real_label = "(라벨 없음)"
-        print(f"  실제 라벨: {real_label}")
-    else:
-        print("  ❗라벨 json 파일을 찾을 수 없습니다.")
-

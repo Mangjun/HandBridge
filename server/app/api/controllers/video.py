@@ -42,7 +42,16 @@ async def upload_video(
         file_path = await save_upload_file(file, unique_filename)
         
         # 비디오 처리 - 키포인트 추출
-        frames_data, video_info = mediapipe_service.process_video(file_path)
+        frames_data = mediapipe_service.extract_keypoints_from_video(file_path)
+
+        cap = cv2.VideoCapture(str(file_path))
+        video_info = {
+            "fps": cap.get(cv2.CAP_PROP_FPS),
+            "num_frames": int(cap.get(cv2.CAP_PROP_FRAME_COUNT)),
+            "width": int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+            "height": int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+        }
+        cap.release()
         
         # 감정 분석 - 마지막 프레임
         emotion_result, _ = emotion_service.process_video(str(file_path))

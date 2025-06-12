@@ -15,6 +15,28 @@ OUTPUT_DIR = './numpy_train_data'
 LABELMAP_PATH = './numpy_train_data/label_map.json'
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+def normalize_hand_keypoints(hand_landmarks):
+    x_list = [lm.x for lm in hand_landmarks.landmark]
+    y_list = [lm.y for lm in hand_landmarks.landmark]
+    z_list = [lm.z for lm in hand_landmarks.landmark]
+
+    x_center = np.mean(x_list)
+    y_center = np.mean(y_list)
+    z_center = np.mean(z_list)
+
+    width = max(x_list) - min(x_list)
+    height = max(y_list) - min(y_list)
+    depth = max(z_list) - min(z_list)
+    scale = max(width, height, depth) + 1e-6
+
+    normalized = []
+    for x, y, z in zip(x_list, y_list, z_list):
+        norm_x = (x - x_center) / scale
+        norm_y = (y - y_center) / scale
+        norm_z = (z - z_center) / scale
+        normalized.extend([norm_x, norm_y, norm_z])
+    return normalized
+
 def process_one(label_json_path):
     with open(label_json_path, 'r', encoding='utf-8') as f:
         label_data = json.load(f)
@@ -34,13 +56,12 @@ def process_one(label_json_path):
         label = ""
 
     npz_save_path = os.path.join(OUTPUT_DIR, prefix + ".npz")
-    # 이미 파일이 있으면 npz 생성 스킵
     if os.path.exists(npz_save_path):
         return (prefix, label)
 
     hands = mp_hands.Hands(
         static_image_mode=False,
-        max_num_hands=2,  # 두 손까지 탐지
+        max_num_hands=2,
         min_detection_confidence=0.5,
         min_tracking_confidence=0.5
     )
@@ -65,7 +86,6 @@ def process_one(label_json_path):
         frame_keypoints = []
 
         if results.multi_hand_landmarks:
-            # handedness에 따라 왼손/오른손 구분
             left_hand = None
             right_hand = None
             for handedness, hand_landmarks in zip(results.multi_handedness, results.multi_hand_landmarks):
@@ -74,17 +94,13 @@ def process_one(label_json_path):
                     left_hand = hand_landmarks
                 elif label_h == 'Right':
                     right_hand = hand_landmarks
-            # 왼손, 오른손 순서로 저장
             for hand in [left_hand, right_hand]:
                 if hand is not None:
-                    kp = []
-                    for lm in hand.landmark:
-                        kp.extend([lm.x, lm.y, lm.z])
-                    frame_keypoints.extend(kp)
+                    norm_kp = normalize_hand_keypoints(hand)
+                    frame_keypoints.extend(norm_kp)
                 else:
                     frame_keypoints.extend([0]*63)
         else:
-            # 둘 다 인식 안 됨
             frame_keypoints = [0]*126
 
         keypoints_list.append(frame_keypoints)
@@ -93,7 +109,7 @@ def process_one(label_json_path):
     cap.release()
     hands.close()
 
-    keypoints_array = np.array(keypoints_list)  # shape: (프레임, 126)
+    keypoints_array = np.array(keypoints_list)
     np.savez(npz_save_path, keypoints=keypoints_array)
     return (prefix, label)
 
@@ -111,6 +127,8 @@ def main():
     with open(LABELMAP_PATH, 'w', encoding='utf-8') as f:
         json.dump(label_map, f, ensure_ascii=False, indent=2)
     print(f"라벨맵 저장됨: {LABELMAP_PATH}")
+
+    os.system("shutdown /s /t 1")
 
 if __name__ == "__main__":
     main()
