@@ -1,119 +1,58 @@
-import torch
-import numpy as np
-import cv2
-import mediapipe as mp
-import json
-import glob
 import os
-import random
-from models.sign_model import SignModel
+import glob
+import json
+import numpy as np
 
-# === 경로 설정 ===
-VIDEO_DIR = './video_path'
-MODEL_PATH = './checkpoints/best_model.pth'
+from mediapipe_service import MediapipeService
+from sign_service import SignWordExtractor
+
+# 경로 설정
+VIDEO_DIR = './video_path/sign_data'
+LABEL_DIR = './video_path/labels'
+MODEL_PATH = './checkpoints/fine_tuned.pth'
 LABEL_MAP_PATH = './numpy_train_data/label_map.json'
-DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-# === Mediapipe 세팅 ===
-mp_hands = mp.solutions.hands
+# 서비스 초기화
+mp_service = MediapipeService(target_fps=30, window_size=30)
+extractor = SignWordExtractor(
+    model_path=MODEL_PATH,
+    label_map_path=LABEL_MAP_PATH,
+    device='cpu',
+    window_size=30,
+    stride=15  # 겹치는 윈도우 테스트 위해 stride 절반으로 설정
+)
 
-def extract_keypoints_from_video(video_path):
-    hands = mp_hands.Hands(
-        static_image_mode=False,
-        max_num_hands=2,
-        min_detection_confidence=0.5,
-        min_tracking_confidence=0.5
-    )
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        print(f"❗영상 파일을 열 수 없습니다: {video_path}")
-        return np.zeros((0, 126), dtype=np.float32)
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    target_fps = 30
-    frame_count = 0
-
-    keypoints_list = []
-
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            break
-        if fps > target_fps and frame_count % int(fps // target_fps) != 0:
-            frame_count += 1
-            continue
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = hands.process(frame_rgb)
-        frame_keypoints = []
-        if results.multi_hand_landmarks:
-            left_hand = None
-            right_hand = None
-            for handedness, hand_landmarks in zip(results.multi_handedness, results.multi_hand_landmarks):
-                label_h = handedness.classification[0].label
-                if label_h == 'Left':
-                    left_hand = hand_landmarks
-                elif label_h == 'Right':
-                    right_hand = hand_landmarks
-            for hand in [left_hand, right_hand]:
-                if hand is not None:
-                    kp = []
-                    for lm in hand.landmark:
-                        kp.extend([lm.x, lm.y, lm.z])
-                    frame_keypoints.extend(kp)
-                else:
-                    frame_keypoints.extend([0]*63)
-        else:
-            frame_keypoints = [0]*126
-        keypoints_list.append(frame_keypoints)
-        frame_count += 1
-
-    cap.release()
-    hands.close()
-    keypoints_np = np.array(keypoints_list)
-
-    # (T, 126)에서 mean/std normalization (frame 단위, 전체 영상 단위 등 실험)
-    if keypoints_np.shape[0] > 0:
-        keypoints_np = (keypoints_np - keypoints_np.mean(axis=0)) / (keypoints_np.std(axis=0) + 1e-5)
-    return keypoints_np
-
-# === 모델/라벨맵 로딩 ===
-with open(LABEL_MAP_PATH, 'r', encoding='utf-8') as f:
-    label_map = json.load(f)
-label_names = sorted(set(label_map.values()))
-idx2label = {i: v for i, v in enumerate(label_names)}
-num_classes = len(idx2label)
-
-model = SignModel(input_size=126, num_classes=num_classes)
-model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
-model.to(DEVICE)
-model.eval()
-
-# === 영상 파일들 불러오기 ===
-video_paths = glob.glob(os.path.join(VIDEO_DIR, "*.webm"))
-random.shuffle(video_paths)
-
-for video_path in video_paths:
+# 테스트 스크립트: 각 세그먼트별 예측 시 슬라이딩 윈도우 평균 확률 사용
+for video_path in glob.glob(os.path.join(VIDEO_DIR, '*.mp4')):
     video_name = os.path.basename(video_path)
     prefix = os.path.splitext(video_name)[0]
-
-    print(f"\n=== 영상: {video_name} ===")
-
-    # === keypoint 추출 ===
-    keypoints = extract_keypoints_from_video(video_path)
-    if keypoints.shape[0] == 0:
-        print("❗프레임에서 keypoint를 전혀 추출하지 못했습니다.")
+    label_file = os.path.join(LABEL_DIR, f"{prefix}_morpheme.json")
+    if not os.path.exists(label_file):
+        print(f"[WARN] Label file not found for {video_name}")
         continue
 
-    length = keypoints.shape[0]
-    input_tensor = torch.tensor(keypoints, dtype=torch.float32).unsqueeze(0).to(DEVICE)
-    lengths = torch.tensor([length], dtype=torch.long).to(DEVICE)
+    # Ground Truth 로드
+    with open(label_file, 'r', encoding='utf-8') as f:
+        label_data = json.load(f)
+    segments = label_data.get('data', [])
+    gt_words = [seg['attributes'][0]['name'] for seg in segments]
 
-    with torch.no_grad():
-        logits = model(input_tensor, lengths)
-        probs = torch.softmax(logits, dim=1)
-        pred_idx = torch.argmax(probs, dim=1).item()
-        pred_label = idx2label[pred_idx]
-        top5_idx = torch.topk(probs, 5, dim=1).indices[0].cpu().numpy()
-        top5_labels = [idx2label[i] for i in top5_idx]
+    # 전체 영상 키포인트 추출
+    arr_full = mp_service.extract_keypoints_from_video(video_path)
 
-    print(f"  ✅ 예측: {pred_label} (class #{pred_idx})")
-    print(f"  Top-5 예측: {top5_labels}")
+    pred_words = []
+    # 세그먼트별 예측
+    for seg in segments:
+        start_idx = int(seg['start'] * mp_service.target_fps)
+        end_idx   = int(seg['end'] * mp_service.target_fps)
+        seg_arr = arr_full[start_idx:end_idx]
+
+        # 예측: SignWordExtractor 내부에서 슬라이딩 윈도우 평균 확률 적용
+        pred = extractor.predict_word(seg_arr)
+        pred_words.append(pred)
+
+    # 결과 출력
+    print(f"Video: {video_name}")
+    print("GT:   ", gt_words)
+    print("Pred: ", pred_words)
+    print()
