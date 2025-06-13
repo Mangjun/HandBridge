@@ -1,7 +1,8 @@
 import torch
 import numpy as np
 import json
-from models.sign_model import SignModel
+
+from app.models.sign_model import SignModel
 
 class SignWordExtractor:
     def __init__(
